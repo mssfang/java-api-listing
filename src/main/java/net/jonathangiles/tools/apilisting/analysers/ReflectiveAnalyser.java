@@ -4,8 +4,6 @@ import net.jonathangiles.tools.apilisting.model.APIListing;
 import net.jonathangiles.tools.apilisting.model.ChildItem;
 import net.jonathangiles.tools.apilisting.model.Token;
 import net.jonathangiles.tools.apilisting.model.TypeKind;
-import net.jonathangiles.tools.apilisting.tests.Test1;
-import net.jonathangiles.tools.apilisting.tests.Test2;
 
 import java.io.File;
 import java.lang.reflect.Constructor;
@@ -15,6 +13,9 @@ import java.lang.reflect.Parameter;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -45,20 +46,40 @@ public class ReflectiveAnalyser implements Analyser {
     }
 
     public void analyse(File inputFile, APIListing apiListing) {
+        String inputFileName = inputFile.toString();
+        if (inputFile.isDirectory()) return;
+        if (inputFileName.contains("implementation")) return;
+        if (!inputFileName.endsWith(".class")) return;
+
         // Root Navigation
         ChildItem rootNavForJar = new ChildItem(inputFile.getName());
         apiListing.addChildItem(rootNavForJar);
 
-        // TODO get list of classes properly
-        Stream.of(Test1.class, Test2.class)
-                .forEach(cls -> {
-                    // Two phases:
-                    //   Phase 1: Build up the map of known types
-                    //   Phase 2: Process all types
-                    boolean success = scanForTypes(cls);
-                    if (! success) return;
-                    getClassAPI(cls, apiListing, rootNavForJar);
-                });
+        try {
+            String rootDirectory = inputFileName.substring(0, inputFileName.indexOf(".jar/") + 5);
+
+            URL url = new File(rootDirectory).toURI().toURL();
+            URL[] urls = new URL[] {url};
+            ClassLoader cl = URLClassLoader.newInstance(urls);
+
+            // The input file will look like 'temp/azure-core-1.0.0-preview.4.jar/com/azure/core/exception/ServiceResponseException.class',
+            // we want this to be 'com/azure/core/exception/ServiceResponseException.class',
+            // which then can become 'com.azure.core.exception.ServiceResponseException'
+            final String fqcn = inputFileName
+                    .substring(inputFileName.indexOf(".jar/") + 5, inputFileName.length() - 6)
+                    .replaceAll("/", ".");
+
+            Class cls = cl.loadClass(fqcn);
+
+            // Two phases:
+            //   Phase 1: Build up the map of known types
+            //   Phase 2: Process all types
+            boolean success = scanForTypes(cls);
+            if (!success) return;
+            getClassAPI(cls, apiListing, rootNavForJar);
+        } catch (MalformedURLException | ClassNotFoundException e) {
+            e.printStackTrace();
+        }
     }
 
     private boolean scanForTypes(Class<?> cls) {
@@ -289,12 +310,10 @@ public class ReflectiveAnalyser implements Analyser {
 
     private void indent() {
         indent += 4;
-        System.out.println("indent");
     }
 
     private void unindent() {
         indent = Math.max(indent - 4, 0);
-        System.out.println("unindent");
     }
 
     private Token makeWhitespace() {
