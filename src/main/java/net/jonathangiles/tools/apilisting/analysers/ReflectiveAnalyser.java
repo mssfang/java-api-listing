@@ -16,7 +16,9 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import static java.lang.reflect.Modifier.isAbstract;
@@ -33,37 +35,69 @@ import static net.jonathangiles.tools.apilisting.model.TokenKind.TYPE_NAME;
 import static net.jonathangiles.tools.apilisting.model.TokenKind.WHITESPACE;
 
 public class ReflectiveAnalyser implements Analyser {
+    private int indent = 0;
+
+    // maps from a class simple name to the id generated with makeId(Class)
+    private final Map<String, String> knownTypes;
+
+    public ReflectiveAnalyser() {
+        this.knownTypes = new HashMap<>();
+    }
 
     public void analyse(File inputFile, APIListing apiListing) {
         // Root Navigation
         ChildItem rootNavForJar = new ChildItem(inputFile.getName());
         apiListing.addChildItem(rootNavForJar);
 
-        // TODO get all class files from the jar file and process them individually
-        getClassAPI(Test1.class, apiListing, rootNavForJar);
-        getClassAPI(Test2.class, apiListing, rootNavForJar);
+        // TODO get list of classes properly
+        Stream.of(Test1.class, Test2.class)
+                .forEach(cls -> {
+                    // Two phases:
+                    //   Phase 1: Build up the map of known types
+                    //   Phase 2: Process all types
+                    boolean success = scanForTypes(cls);
+                    if (! success) return;
+                    getClassAPI(cls, apiListing, rootNavForJar);
+                });
     }
 
-    private void getClassAPI(Class<?> cls, APIListing apiListing, ChildItem parent) {
+    private boolean scanForTypes(Class<?> cls) {
+        if (! (isPublic(cls.getModifiers()) || isProtected(cls.getModifiers()))) {
+            return false;
+        }
+
+        knownTypes.put(cls.getSimpleName(), makeId(cls));
+
+        Stream.of(cls.getDeclaredClasses())
+                .forEach(this::scanForTypes);
+        return true;
+    }
+
+    private boolean getClassAPI(Class<?> cls, APIListing apiListing, ChildItem parent) {
         final List<Token> tokens = apiListing.getTokens();
 
         // class modifier
         boolean isPublicClass = getModifiers(cls.getModifiers(), tokens);
         if (!isPublicClass) {
-            return;
+            return false;
         }
 
+        final String className = cls.getSimpleName();
+        final String classId = makeId(cls);
+
         // Create navigation for this class and add it to the parent
-        ChildItem classNav = new ChildItem(cls.getSimpleName(), cls.getSimpleName(), TypeKind.fromClass(cls));
+        ChildItem classNav = new ChildItem(classId, cls.getSimpleName(), TypeKind.fromClass(cls));
         parent.addChildItem(classNav);
 
         // class name
         tokens.add(new Token(KEYWORD, "class"));
         tokens.add(new Token(WHITESPACE, " "));
-        tokens.add(new Token(TYPE_NAME, cls.getSimpleName()));
+        tokens.add(new Token(TYPE_NAME, className, classId));
         tokens.add(new Token(WHITESPACE, " "));
         tokens.add(new Token(PUNCTUATION, "{"));
         tokens.add(new Token(NEW_LINE, ""));
+
+        indent();
 
         // fields
         Stream.of(cls.getDeclaredFields())
@@ -97,7 +131,9 @@ public class ReflectiveAnalyser implements Analyser {
                     }
 
                     // constructor name
-                    tokens.add(new Token(MEMBER_NAME, constructor.getDeclaringClass().getSimpleName()));
+                    String name = constructor.getDeclaringClass().getSimpleName();
+                    String definitionId = constructor.toString().replaceAll(" ", "-");
+                    tokens.add(new Token(MEMBER_NAME, name, definitionId));
 
                     // opening brace
                     tokens.add(new Token(PUNCTUATION, "("));
@@ -129,7 +165,8 @@ public class ReflectiveAnalyser implements Analyser {
                     tokens.add(new Token(WHITESPACE, " "));
 
                     // method name
-                    tokens.add(new Token(MEMBER_NAME, method.getName()));
+                    String definitionId = method.toString().replaceAll(" ", "-");
+                    tokens.add(new Token(MEMBER_NAME, method.getName(), definitionId));
 
                     // opening brace
                     tokens.add(new Token(PUNCTUATION, "("));
@@ -146,25 +183,32 @@ public class ReflectiveAnalyser implements Analyser {
                     tokens.add(new Token(NEW_LINE, ""));
                 });
 
-        // TODO handle enclosed classes, passing in child navigation as we go deeper
+        // handle enclosed classes, passing in child navigation as we go deeper
         Stream.of(cls.getClasses())
-                .forEach(subclass -> {
-                    getClassAPI(subclass, apiListing, classNav);
-                });
+                .forEach(subclass -> getClassAPI(subclass, apiListing, classNav));
 
         // close class
         tokens.add(new Token(PUNCTUATION, "}"));
         tokens.add(new Token(NEW_LINE, ""));
+
+        unindent();
+
+        return true;
     }
 
     private boolean getModifiers(int modifiers, List<Token> tokens) {
+        // abort - we only care about public and protected methods
+        if (! (isPublic(modifiers) || isProtected(modifiers))) {
+            return false;
+        }
+
+        // indentation
+        tokens.add(makeWhitespace());
+
         if (isPublic(modifiers)) {
             tokens.add(new Token(KEYWORD, "public"));
         } else if (isProtected(modifiers)) {
             tokens.add(new Token(KEYWORD, "protected"));
-        } else {
-            // abort - we only care about public and protected methods
-            return false;
         }
 
         tokens.add(new Token(WHITESPACE, " "));
@@ -210,13 +254,7 @@ public class ReflectiveAnalyser implements Analyser {
             tokens.add(new Token(PUNCTUATION, "<"));
 
             for(int i = 0; i < parameterTypes.length; i++) {
-                if (parameterTypes[i] instanceof Class) {
-                    tokens.add(new Token(TYPE_NAME, ((Class<?>) parameterTypes[i]).getSimpleName()));
-                } else if (parameterTypes[i] instanceof TypeVariable) {
-                    tokens.add(new Token(TYPE_NAME, ((TypeVariable<?>) parameterTypes[i]).getName()));
-                } else {
-                    System.err.println("Unknown type " + parameterTypes[i] + " of type " + parameterTypes[i].getClass());
-                }
+                getType(parameterTypes[i], tokens);
 
                 // add comma and space until the last parameter
                 if (i < parameterTypes.length - 1) {
@@ -227,7 +265,7 @@ public class ReflectiveAnalyser implements Analyser {
 
             tokens.add(new Token(PUNCTUATION, ">"));
         } else if (type instanceof Class) {
-            tokens.add(new Token(TYPE_NAME, getType((Class<?>)type)));
+            getClassType((Class<?>)type, tokens);
         } else if (type instanceof TypeVariable) {
             tokens.add(new Token(TYPE_NAME, ((TypeVariable<?>) type).getName()));
         } else {
@@ -235,11 +273,39 @@ public class ReflectiveAnalyser implements Analyser {
         }
     }
 
-    private String getType(Class<?> type) {
+    private void getClassType(Class<?> type, List<Token> tokens) {
         if (type.isArray()) {
-            return getType(type.getComponentType()) + "[]";
+            getClassType(type.getComponentType(), tokens);
+            tokens.add(new Token(PUNCTUATION, "[]"));
         } else {
-            return type.getSimpleName();
+            String typeName = type.getSimpleName();
+            Token token = new Token(TYPE_NAME, typeName);
+            if (knownTypes.containsKey(typeName)) {
+                token.setNavigateToId(knownTypes.get(typeName));
+            }
+            tokens.add(token);
         }
+    }
+
+    private void indent() {
+        indent += 4;
+        System.out.println("indent");
+    }
+
+    private void unindent() {
+        indent = Math.max(indent - 4, 0);
+        System.out.println("unindent");
+    }
+
+    private Token makeWhitespace() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < indent; i++) {
+            sb.append(" ");
+        }
+        return new Token(WHITESPACE, sb.toString());
+    }
+
+    private String makeId(Class<?> cls) {
+        return cls.getCanonicalName().replaceAll(" ", "-");
     }
 }

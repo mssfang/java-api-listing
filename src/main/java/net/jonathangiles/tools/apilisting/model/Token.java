@@ -16,8 +16,13 @@ public class Token {
     private String value;
 
     public Token(final TokenKind kind, final String value) {
+        this(kind, value, null);
+    }
+
+    public Token(final TokenKind kind, final String value, final String definitionId) {
         this.kind = kind;
         this.value = value;
+        this.definitionId = definitionId;
     }
 
     public String getDefinitionId() {

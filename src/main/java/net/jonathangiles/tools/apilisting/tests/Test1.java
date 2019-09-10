@@ -7,6 +7,14 @@ import java.util.function.Supplier;
 public class Test1 {
     public String name;
 
+    public Test1() {
+
+    }
+
+    public Test1(String text) {
+
+    }
+
     public List<String> getStringList() {
         return null;
     }
