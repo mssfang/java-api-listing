@@ -4,19 +4,12 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.AccessSpecifier;
 import com.github.javaparser.ast.CompilationUnit;
-import com.github.javaparser.ast.DataKey;
 import com.github.javaparser.ast.Modifier;
-import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.NodeList;
-import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
-import com.github.javaparser.ast.body.FieldDeclaration;
-import com.github.javaparser.ast.body.MethodDeclaration;
-import com.github.javaparser.ast.body.VariableDeclarator;
+import com.github.javaparser.ast.body.*;
+import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
-import com.github.javaparser.metamodel.FieldDeclarationMetaModel;
-import com.github.javaparser.printer.lexicalpreservation.LexicalPreservingPrinter;
-import com.sun.org.apache.xpath.internal.operations.Mod;
 import net.jonathangiles.tools.apilisting.model.APIListing;
 import net.jonathangiles.tools.apilisting.model.ChildItem;
 import net.jonathangiles.tools.apilisting.model.Token;
@@ -24,14 +17,11 @@ import net.jonathangiles.tools.apilisting.model.Token;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.List;
+import java.util.Optional;
 
-import static net.jonathangiles.tools.apilisting.model.TokenKind.KEYWORD;
-import static net.jonathangiles.tools.apilisting.model.TokenKind.NEW_LINE;
-import static net.jonathangiles.tools.apilisting.model.TokenKind.PUNCTUATION;
-import static net.jonathangiles.tools.apilisting.model.TokenKind.WHITESPACE;
+import static net.jonathangiles.tools.apilisting.model.TokenKind.*;
 
 public class ASTAnalyser implements Analyser {
-//    List<Token> tokens;
     @Override
     public void analyse(File inputFile, APIListing apiListing) {
         // Root Navigation
@@ -62,43 +52,70 @@ public class ASTAnalyser implements Analyser {
         new ClassOrInterfaceVisitor().visit(compilationUnit, tokens);
     }
 
-
-
-
     private static class ClassOrInterfaceVisitor extends VoidVisitorAdapter {
         @Override
         public void visit(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, Object arg) {
-            List<Token> tokens = (List<Token>) arg;
-            NodeList<Modifier> modifiers = classOrInterfaceDeclaration.getModifiers();
-            AccessSpecifier classAccessSpecifier = classOrInterfaceDeclaration.getAccessSpecifier();
-            // Skip if the class has private or package-private accessibility
-            if (classAccessSpecifier.equals(AccessSpecifier.PRIVATE)
-                    || classAccessSpecifier.equals(AccessSpecifier.PACKAGE_PRIVATE)) {
+            final List<Token> tokens = (List<Token>) arg;
+            // Skip if the class is private or package-private
+            if (isPrivateOrPackagePrivate(classOrInterfaceDeclaration.getAccessSpecifier())) {
                 return;
             }
-            // add modifiers
+
+            getModifiers(classOrInterfaceDeclaration.getModifiers(), tokens);
+            getClassOrInterface(classOrInterfaceDeclaration, tokens);
+            getFields(classOrInterfaceDeclaration, tokens);
+            getConstructor(classOrInterfaceDeclaration, tokens);
+            getMethods(classOrInterfaceDeclaration, tokens);
+
+            // close class
+            tokens.add(new Token(PUNCTUATION, "}"));
+            tokens.add(new Token(NEW_LINE, ""));
+        }
+
+        private void getModifiers(NodeList<Modifier> modifiers, List<Token> tokens) {
             for (Modifier modifier : modifiers) {
-//                System.out.println(" modifier  = "  + modifier);
                 tokens.add(new Token(KEYWORD, modifier.toString()));
             }
-            // Class or interface
+        }
+
+        private boolean isPrivateOrPackagePrivate(AccessSpecifier accessSpecifier) {
+            return accessSpecifier.equals(AccessSpecifier.PRIVATE)
+                    || accessSpecifier.equals(AccessSpecifier.PACKAGE_PRIVATE);
+        }
+
+        private void getDeclarationNameAndParameters(CallableDeclaration callableDeclaration, NodeList<Parameter> parameters, List<Token> tokens) {
+            tokens.add(new Token(STRING_LITERAL, callableDeclaration.getNameAsString()));
+            tokens.add(new Token(PUNCTUATION, "("));
+            if (parameters.size() > 0 ) {
+                for (final Parameter parameter : parameters) {
+                    tokens.add(new Token(TYPE_NAME, parameter.getTypeAsString()));
+                    tokens.add(new Token(WHITESPACE, " "));
+                    tokens.add(new Token(KEYWORD, parameter.getNameAsString()));
+                    tokens.add(new Token(PUNCTUATION, ","));
+                    tokens.add(new Token(WHITESPACE, " "));
+                }
+                tokens.remove(tokens.size() - 1);
+                tokens.remove(tokens.size() - 1);
+            }
+            // close declaration
+            tokens.add(new Token(PUNCTUATION, ")"));
+            tokens.add(new Token(WHITESPACE, " "));
+        }
+
+        private void getClassOrInterface(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, List<Token> tokens) {
             if (classOrInterfaceDeclaration.isInterface()) {
-                tokens.add(new Token(KEYWORD, "interface"));
+                tokens.add(new Token(STRING_LITERAL, "interface"));
             } else {
-                tokens.add(new Token(KEYWORD, "class"));
+                tokens.add(new Token(STRING_LITERAL, "class"));
             }
             tokens.add(new Token(WHITESPACE, " "));
-
-            // name of class or interface
-//            System.out.println("class or interface name = " + classOrInterfaceDeclaration.getName().toString());
-            tokens.add(new Token(KEYWORD, classOrInterfaceDeclaration.getName().toString()));
+            tokens.add(new Token(STRING_LITERAL, classOrInterfaceDeclaration.getNameAsString()));
             tokens.add(new Token(WHITESPACE, " "));
 
             // implements
             NodeList<ClassOrInterfaceType> implementedTypes = classOrInterfaceDeclaration.getImplementedTypes();
-//            System.out.println("implementedType = " + implementedTypes.toString());
             if (implementedTypes.size() > 0) {
-                tokens.add(new Token(KEYWORD, "implements"));
+                tokens.add(new Token(STRING_LITERAL, "implements"));
                 tokens.add(new Token(WHITESPACE, " "));
 
                 for (ClassOrInterfaceType implementedType : implementedTypes) {
@@ -116,28 +133,27 @@ public class ASTAnalyser implements Analyser {
             // extends
             NodeList<ClassOrInterfaceType> extendedTypes = classOrInterfaceDeclaration.getExtendedTypes();
             if (extendedTypes.size() > 0) {
-                tokens.add(new Token(KEYWORD, "extends"));
+                tokens.add(new Token(STRING_LITERAL, "extends"));
                 tokens.add(new Token(WHITESPACE, " "));
-//                System.out.println("extended type = " + extendedTypes.toString());
-
                 // Java only extends one class
                 for (ClassOrInterfaceType extendedType : extendedTypes) {
-                    tokens.add(new Token(KEYWORD, extendedType.toString()));
+                    tokens.add(new Token(STRING_LITERAL, extendedType.toString()));
                 }
                 tokens.add(new Token(WHITESPACE, " "));
             }
-
+            // open ClassOrInterfaceDeclaration
             tokens.add(new Token(PUNCTUATION, "{"));
             tokens.add(new Token(NEW_LINE, ""));
+        }
 
-            // Fields
+        private void getFields(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, List<Token> tokens) {
             List<FieldDeclaration> fieldDeclarations = classOrInterfaceDeclaration.getFields();
             for (final FieldDeclaration fieldDeclaration : fieldDeclarations) {
 
                 // Skip if it is private or package-private field
                 final AccessSpecifier fieldAccessSpecifier = fieldDeclaration.getAccessSpecifier();
                 if (fieldAccessSpecifier.equals(AccessSpecifier.PRIVATE)
-                    || fieldAccessSpecifier.equals(AccessSpecifier.PACKAGE_PRIVATE)) {
+                        || fieldAccessSpecifier.equals(AccessSpecifier.PACKAGE_PRIVATE)) {
                     continue;
                 }
 
@@ -170,71 +186,78 @@ public class ASTAnalyser implements Analyser {
                 } else if (variableDeclarators.size() == 1) {
                     tokens.add(new Token(KEYWORD, fieldDeclaration.getElementType().toString()));
                     tokens.add(new Token(WHITESPACE, " "));
-                    tokens.add(new Token(KEYWORD, variableDeclarators.get(0).getName().toString()));
+                    final VariableDeclarator variableDeclarator = variableDeclarators.get(0);
+                    tokens.add(new Token(KEYWORD, variableDeclarator.getName().toString()));
+
+                    final Optional<Expression> variableDeclaratorOption = variableDeclarator.getInitializer();
+                    if (variableDeclaratorOption.isPresent()) {
+                        tokens.add(new Token(WHITESPACE, " "));
+                        tokens.add(new Token(PUNCTUATION, "="));
+                        tokens.add(new Token(WHITESPACE, " "));
+                        tokens.add(new Token(TEXT, variableDeclaratorOption.get().toString()));
+                    }
                 } else {
                     // will not run at here
                 }
-
-                // assignment
-                System.out.println("size  = " + fieldDeclaration.getDataKeys().size());
-                for (DataKey data : fieldDeclaration.getDataKeys()) {
-                    System.out.println("data = = " + data.toString());
-                }
-//                fieldDeclaration.getData(new DataKey<String>());
-
 
                 // close the variable declaration
                 tokens.add(new Token(PUNCTUATION, ";"));
                 tokens.add(new Token(NEW_LINE, ""));
             }
+        }
+
+        private void getConstructor(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, List<Token> tokens) {
+            for (ConstructorDeclaration constructorDeclaration : classOrInterfaceDeclaration.getConstructors()) {
+                // Skip if not public
+                if (isPrivateOrPackagePrivate(constructorDeclaration.getAccessSpecifier())) {
+                    continue;
+                }
+                // constructor modifiers: public
+                getModifiers(constructorDeclaration.getModifiers(), tokens);
+                // constructor name and parameters
+                getDeclarationNameAndParameters(constructorDeclaration, constructorDeclaration.getParameters(), tokens);
+
+                // constructor throws Exceptions
+                // TODO: add throws Exception
+//                final NodeList<ReferenceType> referenceTypes = constructorDeclaration.getThrownExceptions();
+//                for (final ReferenceType referenceType : referenceTypes) {
+//
+//                }
 
 
-            // Constructors
-//            System.out.println("constructor = " + classOrInterfaceDeclaration.getConstructors().toString());
+                // close statements
+                tokens.add(new Token(PUNCTUATION, "{"));
+                tokens.add(new Token(PUNCTUATION, "}"));
+                tokens.add(new Token(NEW_LINE, ""));
 
-            // Methods
-//            System.out.println("methods = " + classOrInterfaceDeclaration.getMethods().toString());
+                //TODO: research TypeParameter in java https://static.javadoc.io/com.github.javaparser/javaparser-core/3.2.10/com/github/javaparser/ast/type/TypeParameter.html
+//                constructorDeclaration.getTypeParameters();
+            }
+        }
 
+        private void getMethods(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, List<Token> tokens) {
+            final List<MethodDeclaration> methodDeclarations = classOrInterfaceDeclaration.getMethods();
+            for (final MethodDeclaration methodDeclaration : methodDeclarations) {
+                // Skip if not public API
+                if (isPrivateOrPackagePrivate(methodDeclaration.getAccessSpecifier())) {
+                    continue;
+                }
+                // modifiers
+                getModifiers(methodDeclaration.getModifiers(), tokens);
+                // type name
+                tokens.add(new Token(TYPE_NAME, methodDeclaration.getTypeAsString()));
+                tokens.add(new Token(WHITESPACE, " "));
+                // method name and parameters
+                getDeclarationNameAndParameters(methodDeclaration, methodDeclaration.getParameters(), tokens);
 
-            // close class
-            tokens.add(new Token(PUNCTUATION, "}"));
-            tokens.add(new Token(NEW_LINE, ""));
+                // TODO: throws exception
 
-            ////////////////////////////////////////////////////////////////////////////////////
-
-//            System.out.println("type parameters = " + classOrInterfaceDeclaration.getTypeParameters().toString());
+                // close statements
+                tokens.add(new Token(PUNCTUATION, "{"));
+                tokens.add(new Token(PUNCTUATION, "}"));
+                tokens.add(new Token(NEW_LINE, ""));
+            }
         }
     }
-
-
-
-
-
-
-//    private static class MethodVisitor extends VoidVisitorAdapter {
-//        @Override
-//        public void visit(MethodDeclaration methodDeclaration, Object arg) {
-//            List<Token> tokens = (List<Token>) arg;
-//
-//            tokens.add(new Token(KEYWORD, "class"));
-//        }
-//    }
-//    private static class FieldVisitor extends VoidVisitorAdapter {
-//        @Override
-//        public void visit(FieldDeclaration fieldDeclaration, Object arg) {
-//            List<Token> tokens = (List<Token>) arg;
-//
-//            NodeList<Modifier> modifiers = fieldDeclaration.getModifiers();
-//            for (Modifier m : modifiers) {
-//                System.out.println("Modifier = " + m.toString());
-//            }
-//
-//            NodeList<VariableDeclarator> variables = fieldDeclaration.getVariables();
-//            for (VariableDeclarator var : variables) {
-//                System.out.println("Var = " + var.toString() + ", type = " + var.getType());
-//            }
-//        }
-//    }
-
 }
 
