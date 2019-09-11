@@ -25,5 +25,6 @@
             <artifactId>javaparser-symbol-solver-core</artifactId>
             <version>3.14.13</version>
         </dependency>
+
     </dependencies>
 </project>

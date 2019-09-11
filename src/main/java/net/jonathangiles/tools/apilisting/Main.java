@@ -1,6 +1,7 @@
 package net.jonathangiles.tools.apilisting;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.jonathangiles.tools.apilisting.analysers.ASTAnalyser;
 import net.jonathangiles.tools.apilisting.analysers.ReflectiveAnalyser;
 import net.jonathangiles.tools.apilisting.model.APIListing;
 import net.jonathangiles.tools.apilisting.model.Token;
@@ -19,7 +20,10 @@ public class Main {
         // TODO validate input
 
         String reviewName = "Storage GA review";
-        String jarFile = "target/classes/net/jonathangiles/tools/apilisting/tests/Test1.class";
+//        String jarFile = "target/classes/net/jonathangiles/tools/apilisting/tests/Test1.class";
+        String jarFile = "src/main/java/net/jonathangiles/tools/apilisting/tests/Test1.java";
+//        String jarFile = "src/main/java/net/jonathangiles/tools/apilisting/analysers/Test11.java";
+
         String outputFile = "target/result.json";
         Main main = new Main(reviewName, jarFile, outputFile);
     }
@@ -40,7 +44,8 @@ public class Main {
         apiListing.setTokens(tokens);
 
         // TODO select analyser based on user input
-        new ReflectiveAnalyser().analyse(file, apiListing);
+//        new ReflectiveAnalyser().analyse(file, apiListing);
+        new ASTAnalyser().analyse(file, apiListing);
 
         // print to console
         tokens.stream().forEach(token -> {

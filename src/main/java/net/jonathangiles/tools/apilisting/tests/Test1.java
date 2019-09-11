@@ -2,10 +2,22 @@ package net.jonathangiles.tools.apilisting.tests;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 public class Test1 {
     public String name;
+    public int val;
+    public static final String STATIC_FINAL = "sss";
+    public final int intFinal = 1;
+    public static char charStatidc = 'a';
+    protected String helleWord;
+    public Set<String> set;
+    public String a,b,c;
+
+    private int privateInt;
+    String packagePrivate;
+
 
     public Test1() {
 
