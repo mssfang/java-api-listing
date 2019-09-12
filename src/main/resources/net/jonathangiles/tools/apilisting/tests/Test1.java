@@ -136,4 +136,108 @@ public class Test1<T extends Comparable<D>> {
     public interface C {
 
     }
+
+    public enum UserStatus { // Basic Enum
+        PENDING,
+        ACTIVE,
+        INACTIVE,
+        DELETED;
+    }
+
+    public enum WhoisRIR { // Enum + Instance field
+        ARIN("whois.arin.net"),
+        RIPE("whois.ripe.net"),
+        APNIC("whois.apnic.net"),
+        AFRINIC("whois.afrinic.net"),
+        LACNIC("whois.lacnic.net"),
+        JPNIC("whois.nic.ad.jp"),
+        KRNIC("whois.nic.or.kr"),
+        CNNIC("ipwhois.cnnic.cn"),
+        UNKNOWN("");
+
+        private String url;
+
+        WhoisRIR(String url) {
+            this.url = url;
+        }
+
+        public String url() {
+            return url;
+        }
+    }
+
+    public enum Operation { // Enum + Method + Some logic
+        PLUS,
+        MINUS,
+        TIMES,
+        DIVIDE;
+
+        double calculate(double x, double y) {
+            switch (this) {
+                case PLUS:
+                    return x + y;
+                case MINUS:
+                    return x - y;
+                case TIMES:
+                    return x * y;
+                case DIVIDE:
+                    return x / y;
+                default:
+                    throw new AssertionError("Unknown operations " + this);
+            }
+        }
+
+    }
+
+}
+public enum UserStatus { // Basic Enum
+    PENDING,
+    ACTIVE,
+    INACTIVE,
+    DELETED;
+}
+
+public enum WhoisRIR { // Enum + Instance field
+    ARIN("whois.arin.net"),
+    RIPE("whois.ripe.net"),
+    APNIC("whois.apnic.net"),
+    AFRINIC("whois.afrinic.net"),
+    LACNIC("whois.lacnic.net"),
+    JPNIC("whois.nic.ad.jp"),
+    KRNIC("whois.nic.or.kr"),
+    CNNIC("ipwhois.cnnic.cn"),
+    UNKNOWN("");
+
+    private String url;
+
+    WhoisRIR(String url) {
+        this.url = url;
+    }
+
+    public String url() {
+        return url;
+    }
+}
+
+public enum Operation { // Enum + Method + Some logic
+    PLUS,
+    MINUS,
+    TIMES,
+    DIVIDE;
+
+    double calculate(double x, double y) {
+        switch (this) {
+            case PLUS:
+                return x + y;
+            case MINUS:
+                return x - y;
+            case TIMES:
+                return x * y;
+            case DIVIDE:
+                return x / y;
+            default:
+                throw new AssertionError("Unknown operations " + this);
+        }
+    }
+
 }

@@ -21,13 +21,16 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static net.jonathangiles.tools.apilisting.model.TokenKind.*;
 
 public class ASTAnalyser implements Analyser {
     private final Map<String, String> knownTypes;
+    private int indent;
 
     public ASTAnalyser() {
+        this.indent = 0;
         this.knownTypes = new HashMap<>();
     }
 
@@ -57,36 +60,37 @@ public class ASTAnalyser implements Analyser {
             return;
         }
         new ScanForClassTypeVisitor().visit(compilationUnitParseResult.getResult().get(), knownTypes);
-        new ClassOrInterfaceVisitor(0, rootNavForJar).visit(compilationUnitParseResult.getResult().get(), tokens);
-//        new EnumVisitor().visit(compilationUnitParseResult.getResult().get(), tokens);
+        new ClassOrInterfaceVisitor(rootNavForJar).visit(compilationUnitParseResult.getResult().get(), tokens);
     }
 
-//    private class EnumVisitor extends  VoidVisitorAdapter {
-//        @Override
-//        public void visit(EnumDeclaration enumDeclaration, Object arg) {
-//            final List<Token> tokens = (List<Token>) arg;
-//
-//        }
-//    }
-
     private class ClassOrInterfaceVisitor extends VoidVisitorAdapter {
-        private int indent;
         private ChildItem parent;
 
-        ClassOrInterfaceVisitor(int indent, ChildItem root) {
-            this.indent = indent;
+        ClassOrInterfaceVisitor(ChildItem root) {
             parent = root;
         }
 
         @Override
-        public void visit(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, Object arg) {
+        public void visit(CompilationUnit compilationUnit, Object arg) {
             final List<Token> tokens = (List<Token>) arg;
 
-            getClassOrInterface(classOrInterfaceDeclaration, tokens);
-            getFields(classOrInterfaceDeclaration, tokens);
-            getConstructor(classOrInterfaceDeclaration, tokens);
-            getMethods(classOrInterfaceDeclaration, tokens);
-            getInnerClass(classOrInterfaceDeclaration, tokens);
+            NodeList<TypeDeclaration<?>> types = compilationUnit.getTypes();
+            for (final TypeDeclaration<?> typeDeclaration : types) {
+                visitClassOrInterfaceOrEnumDeclaration(typeDeclaration, tokens);
+            }
+        }
+
+        private void visitClassOrInterfaceOrEnumDeclaration(TypeDeclaration<?> typeDeclaration, List<Token> tokens) {
+            getTypeDeclaration(typeDeclaration, tokens);
+
+            if (typeDeclaration.isEnumDeclaration()) {
+                getEnumEntries(((EnumDeclaration)typeDeclaration).getEntries(), tokens);
+            }
+
+            getFields(typeDeclaration.getFields(), tokens);
+            getConstructor(typeDeclaration.getConstructors(), tokens);
+            getMethods(typeDeclaration.getMethods(), tokens);
+            getInnerClass(typeDeclaration.getMembers(), tokens);
 
             // close class
             tokens.add(makeWhitespace());
@@ -94,53 +98,92 @@ public class ASTAnalyser implements Analyser {
             tokens.add(new Token(NEW_LINE, ""));
         }
 
-        private void getClassOrInterface(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, List<Token> tokens) {
+        private void getEnumEntries(NodeList<EnumConstantDeclaration> enumConstantDeclarations, List<Token> tokens) {
+            int size = enumConstantDeclarations.size();
+            indent();
+
+            AtomicInteger counter = new AtomicInteger();
+
+            enumConstantDeclarations.stream().forEach(enumConstantDeclaration -> {
+                tokens.add(makeWhitespace());
+                tokens.add(new Token(MEMBER_NAME, enumConstantDeclaration.getNameAsString()));
+
+                enumConstantDeclaration.getArguments().stream().forEach(expression -> {
+                    tokens.add(new Token(PUNCTUATION, "("));
+                    tokens.add(new Token(TEXT, expression.toString()));
+                    tokens.add(new Token(PUNCTUATION, ")"));
+                });
+
+                if (counter.getAndIncrement() < size - 1) {
+                    tokens.add(new Token(PUNCTUATION, ","));
+                } else {
+                    tokens.add(new Token(PUNCTUATION, ";"));
+                }
+                tokens.add(new Token(NEW_LINE, ""));
+            });
+
+            unindent();
+        }
+        private void getTypeDeclaration(TypeDeclaration typeDeclaration, List<Token> tokens) {
             // Skip if the class is private or package-private
-            if (isPrivateOrPackagePrivate(classOrInterfaceDeclaration.getAccessSpecifier())) {
+            if (isPrivateOrPackagePrivate(typeDeclaration.getAccessSpecifier())) {
                 return;
             }
 
-            getModifiers(classOrInterfaceDeclaration.getModifiers(), tokens);
+            // Get modifiers
+            getModifiers(typeDeclaration.getModifiers(), tokens);
 
+            // Get type kind
             TypeKind typeKind;
-            if (classOrInterfaceDeclaration.isInterface()) {
-                typeKind = TypeKind.INTERFACE;
-            } else if (classOrInterfaceDeclaration.isEnumDeclaration()){
+            if (typeDeclaration.isClassOrInterfaceDeclaration()) {
+                typeKind = ((ClassOrInterfaceDeclaration)typeDeclaration).isInterface() ? TypeKind.INTERFACE : TypeKind.CLASS;
+            } else if (typeDeclaration.isEnumDeclaration()) {
                 typeKind = TypeKind.ENUM;
             } else {
-                typeKind = TypeKind.CLASS;
+                typeKind = TypeKind.UNKNOWN;
             }
 
-            final String className = classOrInterfaceDeclaration.getNameAsString();
-            final String classId = makeId(classOrInterfaceDeclaration.getFullyQualifiedName().get());
             // Create navigation for this class and add it to the parent
+            final String className = typeDeclaration.getNameAsString();
+            final String classId = makeId(typeDeclaration.getFullyQualifiedName().get().toString());
             ChildItem classNav = new ChildItem(classId, className, typeKind);
             parent.addChildItem(classNav);
             parent = classNav;
 
             tokens.add(new Token(KEYWORD, typeKind.getName()));
-
             tokens.add(new Token(WHITESPACE, " "));
             tokens.add(new Token(TYPE_NAME, className, classId));
 
-            // type parameters of class definition
-            getTypeParameters(classOrInterfaceDeclaration.getTypeParameters(), tokens);
+            NodeList<ClassOrInterfaceType> implementedTypes = null;
+            // Type parameters of class definition
+            if (typeDeclaration.isClassOrInterfaceDeclaration()) {
+                final ClassOrInterfaceDeclaration classOrInterfaceDeclaration = (ClassOrInterfaceDeclaration)typeDeclaration;
 
-            // extends
-            final NodeList<ClassOrInterfaceType> extendedTypes = classOrInterfaceDeclaration.getExtendedTypes();
-            if (extendedTypes.size() > 0) {
-                tokens.add(new Token(KEYWORD, "extends"));
-                tokens.add(new Token(WHITESPACE, " "));
-                // Java only extends one class
-                for (ClassOrInterfaceType extendedType : extendedTypes) {
-                    getType(extendedType, tokens);
+                // Get type parameters
+                getTypeParameters(classOrInterfaceDeclaration.getTypeParameters(), tokens);
+
+                // Extends a class
+                final NodeList<ClassOrInterfaceType> extendedTypes = classOrInterfaceDeclaration.getExtendedTypes();
+                if (extendedTypes.size() > 0) {
+                    tokens.add(new Token(KEYWORD, "extends"));
+                    tokens.add(new Token(WHITESPACE, " "));
+                    // Java only extends one class
+                    for (ClassOrInterfaceType extendedType : extendedTypes) {
+                        getType(extendedType, tokens);
+                    }
                 }
-                tokens.add(new Token(WHITESPACE, " "));
+                // Assign implement types
+                implementedTypes = classOrInterfaceDeclaration.getImplementedTypes();
+            } else if (typeDeclaration.isEnumDeclaration()) {
+                final EnumDeclaration enumDeclaration = (EnumDeclaration)typeDeclaration;
+                // Assign implement types
+                implementedTypes = enumDeclaration.getImplementedTypes();
+            } else {
+                System.err.println("Not a class, interface or enum declaration");
             }
 
-            // implements
-            final NodeList<ClassOrInterfaceType> implementedTypes = classOrInterfaceDeclaration.getImplementedTypes();
-            if (implementedTypes.size() > 0) {
+            // implements interfaces
+            if (implementedTypes != null && implementedTypes.size() > 0) {
                 tokens.add(new Token(KEYWORD, "implements"));
                 tokens.add(new Token(WHITESPACE, " "));
 
@@ -153,16 +196,16 @@ public class ASTAnalyser implements Analyser {
                     tokens.remove(tokens.size() - 1);
                     tokens.remove(tokens.size() - 1);
                 }
-                tokens.add(new Token(WHITESPACE, " "));
             }
             // open ClassOrInterfaceDeclaration
+            tokens.add(new Token(WHITESPACE, " "));
             tokens.add(new Token(PUNCTUATION, "{"));
             tokens.add(new Token(NEW_LINE, ""));
         }
 
-        private void getFields(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, List<Token> tokens) {
+        private void getFields(List<FieldDeclaration> fieldDeclarations, List<Token> tokens) {
             indent();
-            for (final FieldDeclaration fieldDeclaration : classOrInterfaceDeclaration.getFields()) {
+            for ( FieldDeclaration fieldDeclaration : fieldDeclarations) {
                 // Skip if it is private or package-private field
                 if (isPrivateOrPackagePrivate(fieldDeclaration.getAccessSpecifier())) {
                     continue;
@@ -212,9 +255,9 @@ public class ASTAnalyser implements Analyser {
             unindent();
         }
 
-        private void getConstructor(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, List<Token> tokens) {
+        private void getConstructor(List<ConstructorDeclaration> constructorDeclarations, List<Token> tokens) {
             indent();
-            for (final ConstructorDeclaration constructorDeclaration : classOrInterfaceDeclaration.getConstructors()) {
+            for (final ConstructorDeclaration constructorDeclaration : constructorDeclarations) {
                 // Skip if not public
                 if (isPrivateOrPackagePrivate(constructorDeclaration.getAccessSpecifier())) {
                     continue;
@@ -241,9 +284,9 @@ public class ASTAnalyser implements Analyser {
             unindent();
         }
 
-        private void getMethods(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, List<Token> tokens) {
+        private void getMethods(List<MethodDeclaration> methodDeclarations, List<Token> tokens) {
             indent();
-            for (final MethodDeclaration methodDeclaration : classOrInterfaceDeclaration.getMethods()) {
+            for (final MethodDeclaration methodDeclaration : methodDeclarations) {
                 // Skip if not public API
                 if (isPrivateOrPackagePrivate(methodDeclaration.getAccessSpecifier())) {
                     continue;
@@ -274,12 +317,12 @@ public class ASTAnalyser implements Analyser {
             unindent();
         }
 
-        private void getInnerClass(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, List<Token> tokens) {
+        private void getInnerClass(NodeList<BodyDeclaration<?>> bodyDeclarations, List<Token> tokens) {
             indent();
-            for (final BodyDeclaration bodyDeclaration : classOrInterfaceDeclaration.getMembers()) {
-                if (bodyDeclaration.isClassOrInterfaceDeclaration()) {
-                    tokens.add(makeWhitespace());
-                    new ClassOrInterfaceVisitor(indent, parent).visit(bodyDeclaration.asClassOrInterfaceDeclaration(), tokens);
+            tokens.add(makeWhitespace());
+            for (final BodyDeclaration bodyDeclaration : bodyDeclarations) {
+                if (bodyDeclaration.isEnumDeclaration() || bodyDeclaration.isClassOrInterfaceDeclaration()) {
+                    new ClassOrInterfaceVisitor(parent).visitClassOrInterfaceOrEnumDeclaration(bodyDeclaration.asTypeDeclaration(), tokens);
                 }
             }
             unindent();
@@ -377,26 +420,6 @@ public class ASTAnalyser implements Analyser {
             tokens.add(new Token(WHITESPACE, " "));
         }
 
-        private void indent() {
-            indent += 4;
-        }
-
-        private void unindent() {
-            indent = Math.max(indent - 4, 0);
-        }
-
-        private Token makeWhitespace() {
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < indent; i++) {
-                sb.append(" ");
-            }
-            return new Token(WHITESPACE, sb.toString());
-        }
-
-        private String makeId(String fullPath) {
-            return fullPath.replaceAll(" ", "-");
-        }
-
         private void getType(Object type, List<Token> tokens) {
             if (type instanceof Parameter) {
                 final Parameter parameterType = (Parameter) type;
@@ -464,35 +487,64 @@ public class ASTAnalyser implements Analyser {
 
     private class ScanForClassTypeVisitor extends VoidVisitorAdapter {
         @Override
-        public void visit(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, Object arg) {
-            Map<String, String> knownTypes = (Map<String, String>)arg;
-            getClassOrInterface(classOrInterfaceDeclaration, knownTypes);
+        public void visit(CompilationUnit compilationUnit, Object arg) {
+            for (final TypeDeclaration<?> typeDeclaration : compilationUnit.getTypes()) {
+                getTypeDeclaration(typeDeclaration, (Map<String, String>)arg);
+            }
         }
-
-        private void getClassOrInterface(ClassOrInterfaceDeclaration classOrInterfaceDeclaration, Map<String, String> knownTypes) {
+        private void getTypeDeclaration(TypeDeclaration typeDeclaration, Map<String, String> knownTypes) {
             // Skip if the class is private or package-private
-            if (isPrivateOrPackagePrivate(classOrInterfaceDeclaration.getAccessSpecifier())) {
+            if (isPrivateOrPackagePrivate(typeDeclaration.getAccessSpecifier())) {
                 return;
             }
 
-            knownTypes.put(classOrInterfaceDeclaration.getNameAsString(),
-                    makeId(classOrInterfaceDeclaration.getFullyQualifiedName().get()));
+            final String fullQualifiedName;
 
-            for (final BodyDeclaration bodyDeclaration : classOrInterfaceDeclaration.getMembers()) {
-                if (bodyDeclaration.isClassOrInterfaceDeclaration()) {
-                    new ScanForClassTypeVisitor().visit(bodyDeclaration.asClassOrInterfaceDeclaration(), knownTypes);
-                }
+            if (typeDeclaration.isClassOrInterfaceDeclaration()) {
+                fullQualifiedName = ((ClassOrInterfaceDeclaration)typeDeclaration).getFullyQualifiedName().get();
+            } else if (typeDeclaration.isEnumDeclaration()) {
+                fullQualifiedName = ((EnumDeclaration)typeDeclaration).getFullyQualifiedName().get();
+            } else {
+                fullQualifiedName = null;
             }
 
-        }
+            if (fullQualifiedName == null) {
+                return;
+            }
 
-        private boolean isPrivateOrPackagePrivate(AccessSpecifier accessSpecifier) {
-            return accessSpecifier.equals(AccessSpecifier.PRIVATE)
-                    || accessSpecifier.equals(AccessSpecifier.PACKAGE_PRIVATE);
-        }
+            knownTypes.put(typeDeclaration.getNameAsString(), makeId(fullQualifiedName));
 
-        private String makeId(String fullPath) {
-            return fullPath.replaceAll(" ", "-");
+            for (final Object bodyDeclaration : typeDeclaration.getMembers()) {
+                BodyDeclaration bodyDeclarationMember = (BodyDeclaration)bodyDeclaration;
+                if (bodyDeclarationMember.isEnumDeclaration() || bodyDeclarationMember.isClassOrInterfaceDeclaration()) {
+                    getTypeDeclaration(bodyDeclarationMember.asTypeDeclaration(), knownTypes);
+                }
+            }
         }
+    }
+
+    private boolean isPrivateOrPackagePrivate(AccessSpecifier accessSpecifier) {
+        return accessSpecifier.equals(AccessSpecifier.PRIVATE)
+                || accessSpecifier.equals(AccessSpecifier.PACKAGE_PRIVATE);
+    }
+
+    private String makeId(String fullPath) {
+        return fullPath.replaceAll(" ", "-");
+    }
+
+    private void indent() {
+        indent += 4;
+    }
+
+    private void unindent() {
+        indent = Math.max(indent - 4, 0);
+    }
+
+    private Token makeWhitespace() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < indent; i++) {
+            sb.append(" ");
+        }
+        return new Token(WHITESPACE, sb.toString());
     }
 }
