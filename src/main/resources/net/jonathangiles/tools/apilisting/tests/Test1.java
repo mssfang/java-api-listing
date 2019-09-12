@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 
-public class Test1 {
+public class Test1<T extends Comparable<D>> {
     public String name;
     public int val;
     public static final String STATIC_FINAL = "sss";
@@ -85,7 +85,7 @@ public class Test1 {
         return max;   // returns the largest object
     }
 
-    public static abstract class InnerClass extends Exception implements A, C {
+    public static abstract class InnerClass<A, B> extends Exception implements A, C {
         public String name;
         public int val;
         public static final String STATIC_FINAL = "sss";
@@ -105,9 +105,14 @@ public class Test1 {
             return null;
         }
 
-        public Map<String,Integer> getStringIntegerMapInnerClass() {
+        public Map<String, Integer> getStringIntegerMapInnerClass() {
             return null;
         }
+
+        public Map<Set<Map<Double, String>>, Map<Long, Integer>> getStringIntegerMapInnerClass() {
+            return null;
+        }
+
 
         public void setStringListInnerClass(List<String> list) { }
 
@@ -124,7 +129,7 @@ public class Test1 {
         }
     }
 
-    public interface A {
+    public interface A<F, G> {
 
     }
 

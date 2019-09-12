@@ -115,6 +115,9 @@ public class ASTAnalyser implements Analyser {
             tokens.add(new Token(TYPE_NAME, className, classId));
             tokens.add(new Token(WHITESPACE, " "));
 
+            // type parameters of class definition
+            getTypeParameters(classOrInterfaceDeclaration.getTypeParameters(), tokens);
+
             // extends
             final NodeList<ClassOrInterfaceType> extendedTypes = classOrInterfaceDeclaration.getExtendedTypes();
             if (extendedTypes.size() > 0) {
@@ -216,7 +219,7 @@ public class ASTAnalyser implements Analyser {
                 getModifiers(constructorDeclaration.getModifiers(), tokens);
 
                 // type parameters of constructor
-                getTypeParameters(constructorDeclaration, tokens);
+                getTypeParameters(constructorDeclaration.getTypeParameters(), tokens);
 
                 // constructor name and parameters
                 getDeclarationNameAndParameters(constructorDeclaration, constructorDeclaration.getParameters(), tokens);
@@ -246,7 +249,7 @@ public class ASTAnalyser implements Analyser {
                 getModifiers(methodDeclaration.getModifiers(), tokens);
 
                 // type parameters of methods
-                getTypeParameters(methodDeclaration, tokens);
+                getTypeParameters(methodDeclaration.getTypeParameters(), tokens);
 
                 // type name
                 getType(methodDeclaration, tokens);
@@ -310,16 +313,36 @@ public class ASTAnalyser implements Analyser {
             tokens.add(new Token(WHITESPACE, " "));
         }
 
-        private void getTypeParameters(CallableDeclaration callableDeclaration, List<Token> tokens) {
-            final NodeList<TypeParameter> typeParameters = callableDeclaration.getTypeParameters();
-            if (typeParameters.size() == 0) {
+        private void getTypeParameters(NodeList<TypeParameter> typeParameters, List<Token> tokens) {
+//            final NodeList<TypeParameter> typeParameters = callableDeclaration.getTypeParameters();
+
+            final int size = typeParameters.size();
+            if (size == 0) {
                 return;
             }
-
+            //TODO: fix type parameter display
             tokens.add(new Token(PUNCTUATION, "<"));
-            for (final TypeParameter typeParameter : typeParameters) {
+            for (int i = 0; i < size; i++) {
+                final TypeParameter typeParameter = typeParameters.get(i);
+
+                getClassType(typeParameter, tokens);
+
+                if (i != 0 && i != size - 1) {
+                    tokens.add(new Token(PUNCTUATION, ","));
+                    tokens.add(new Token(WHITESPACE, " "));
+                }
+
+
                 tokens.add(new Token(TYPE_NAME, typeParameter.asString()));
+                System.out.println("index = " + i +
+                        ", Type Parameter = " + typeParameter + ", Name as String = " + typeParameter.getNameAsString() +
+                ", Type Bound = " + typeParameter.getTypeBound() +
+                ", Children Nodes  = " + typeParameter.getChildNodes() +
+                ", Element type = " + typeParameter.getElementType() +
+                ", Name as Expression = " + typeParameter.getNameAsExpression());
             }
+//
+//
             tokens.add(new Token(PUNCTUATION, ">"));
             tokens.add(new Token(WHITESPACE, " "));
         }
@@ -386,68 +409,44 @@ public class ASTAnalyser implements Analyser {
             } else if (type.isPrimitiveType() || type.isVoidType()) {
                 tokens.add(new Token(TYPE_NAME, type.toString()));
             } else if (type.isReferenceType() || type.isTypeParameter() || type.isWildcardType()) {
-                // TODO: Map<String,Integer>, List<String>, Supplier<T> all considered as reference type and which we won't able to parse any further as it is ReferenceType
-                for (final Node node : type.getChildNodes()) {
-
-                    final List<Node> nodes = node.getChildNodes();
-                    if (nodes.size() == 0) {
-                        System.out.println("000000");
-                        final String typeName = node.toString();
-                        final Token token = new Token(TYPE_NAME, typeName);
-                        if (knownTypes.containsKey(typeName)) {
-                            token.setNavigateToId(knownTypes.get(typeName));
-                        }
-                        System.out.println("size = 0, token = " + token);
-                        tokens.add(token);
-
-                    } else {
-
-                        recursion(node, tokens);
-                    }
-                }
+                getTypeDFS(type, tokens);
             } else {
                 System.err.println("Unknown type");
             }
         }
 
-
-        private void recursion(Node node, List<Token> tokens) {
-
+        private void getTypeDFS(Node node, List<Token> tokens) {
             final List<Node> nodes = node.getChildNodes();
-            tokens.add(new Token(PUNCTUATION, "<"));
+            final int childrenSize = nodes.size();
+            if (childrenSize <= 1) {
+                final String typeName = node.toString();
+                System.out.println("getTypeDFS =========== typename = " + typeName);
+                final Token token = new Token(TYPE_NAME, typeName);
+                if (knownTypes.containsKey(typeName)) {
+                    token.setNavigateToId(knownTypes.get(typeName));
+                }
+                tokens.add(token);
+                return;
+            }
 
-            for (final Node currentNode : nodes) {
-                if (currentNode.getChildNodes().size() == 0) {
-                    final String typeName = node.toString();
-                    final Token token = new Token(TYPE_NAME, typeName);
-                    if (knownTypes.containsKey(typeName)) {
-                        token.setNavigateToId(knownTypes.get(typeName));
-                    }
-                    System.out.println("size = 0+++, token = " + token);
-                    tokens.add(token);
-                } else if (currentNode.getChildNodes().size() == 1) {
-                    final String typeName = currentNode.toString();
-                    final Token token = new Token(TYPE_NAME, typeName);
-                    if (knownTypes.containsKey(typeName)) {
-                        token.setNavigateToId(knownTypes.get(typeName));
-                    }
-                    System.out.println("size ?= " + currentNode.getChildNodes().size() + " , currentNode = " + currentNode + ", type name = " + typeName);
+            for (int i = 0; i < childrenSize; i++) {
+                final Node currentNode = nodes.get(i);
 
-                    tokens.add(token);
-                    tokens.add(new Token(PUNCTUATION, ","));
-                    tokens.add(new Token(WHITESPACE, " "));
-                } else {
-                    System.out.println("size ????= " + currentNode.getChildNodes().size() + " , currentNode = =====" + currentNode );
-                    recursion(currentNode, tokens);
+                if (i == 1) {
+                    tokens.add(new Token(PUNCTUATION, "<"));
+                }
+
+                getTypeDFS(currentNode, tokens);
+
+                if (i != 0 && i != childrenSize - 1) {
                     tokens.add(new Token(PUNCTUATION, ","));
                     tokens.add(new Token(WHITESPACE, " "));
                 }
 
-
+                if (i != 0 && i == childrenSize - 1) {
+                    tokens.add(new Token(PUNCTUATION, ">"));
+                }
             }
-//            tokens.remove(tokens.size() - 1);
-//            tokens.remove(tokens.size() - 1);
-            tokens.add(new Token(PUNCTUATION, ">"));
         }
     }
 
