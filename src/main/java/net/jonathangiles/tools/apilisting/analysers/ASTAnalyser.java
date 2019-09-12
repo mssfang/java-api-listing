@@ -58,7 +58,16 @@ public class ASTAnalyser implements Analyser {
         }
         new ScanForClassTypeVisitor().visit(compilationUnitParseResult.getResult().get(), knownTypes);
         new ClassOrInterfaceVisitor(0, rootNavForJar).visit(compilationUnitParseResult.getResult().get(), tokens);
+//        new EnumVisitor().visit(compilationUnitParseResult.getResult().get(), tokens);
     }
+
+//    private class EnumVisitor extends  VoidVisitorAdapter {
+//        @Override
+//        public void visit(EnumDeclaration enumDeclaration, Object arg) {
+//            final List<Token> tokens = (List<Token>) arg;
+//
+//        }
+//    }
 
     private class ClassOrInterfaceVisitor extends VoidVisitorAdapter {
         private int indent;
@@ -120,11 +129,11 @@ public class ASTAnalyser implements Analyser {
             // extends
             final NodeList<ClassOrInterfaceType> extendedTypes = classOrInterfaceDeclaration.getExtendedTypes();
             if (extendedTypes.size() > 0) {
-                tokens.add(new Token(STRING_LITERAL, "extends"));
+                tokens.add(new Token(KEYWORD, "extends"));
                 tokens.add(new Token(WHITESPACE, " "));
                 // Java only extends one class
                 for (ClassOrInterfaceType extendedType : extendedTypes) {
-                    tokens.add(new Token(STRING_LITERAL, extendedType.toString()));
+                    getType(extendedType, tokens);
                 }
                 tokens.add(new Token(WHITESPACE, " "));
             }
@@ -132,11 +141,11 @@ public class ASTAnalyser implements Analyser {
             // implements
             final NodeList<ClassOrInterfaceType> implementedTypes = classOrInterfaceDeclaration.getImplementedTypes();
             if (implementedTypes.size() > 0) {
-                tokens.add(new Token(STRING_LITERAL, "implements"));
+                tokens.add(new Token(KEYWORD, "implements"));
                 tokens.add(new Token(WHITESPACE, " "));
 
                 for (final ClassOrInterfaceType implementedType : implementedTypes) {
-                    tokens.add(new Token(KEYWORD, implementedType.toString()));
+                    getType(implementedType, tokens);
                     tokens.add(new Token(PUNCTUATION, ","));
                     tokens.add(new Token(WHITESPACE, " "));
                 }
@@ -344,8 +353,7 @@ public class ASTAnalyser implements Analyser {
                 tokens.add(new Token(KEYWORD, "extends"));
                 tokens.add(new Token(WHITESPACE, " "));
                 for (int i = 0; i < size; i++) {
-                    ClassOrInterfaceType classType = typeBounds.get(i);
-                    getClassType(classType, tokens);
+                    getType(typeBounds.get(i), tokens);
                 }
             }
         }
@@ -399,6 +407,8 @@ public class ASTAnalyser implements Analyser {
             } else if (type instanceof FieldDeclaration) {
                 getClassType(((FieldDeclaration)type).getElementType(), tokens);
                 tokens.add(new Token(WHITESPACE, " "));
+            } else if (type instanceof ClassOrInterfaceType) {
+                getClassType(((ClassOrInterfaceType)type), tokens);
             } else {
                 System.err.println("Unknown type " + type + " of type " + type.getClass());
             }
