@@ -113,7 +113,6 @@ public class ASTAnalyser implements Analyser {
 
             tokens.add(new Token(WHITESPACE, " "));
             tokens.add(new Token(TYPE_NAME, className, classId));
-            tokens.add(new Token(WHITESPACE, " "));
 
             // type parameters of class definition
             getTypeParameters(classOrInterfaceDeclaration.getTypeParameters(), tokens);
@@ -147,8 +146,6 @@ public class ASTAnalyser implements Analyser {
                 }
                 tokens.add(new Token(WHITESPACE, " "));
             }
-
-
             // open ClassOrInterfaceDeclaration
             tokens.add(new Token(PUNCTUATION, "{"));
             tokens.add(new Token(NEW_LINE, ""));
@@ -314,37 +311,43 @@ public class ASTAnalyser implements Analyser {
         }
 
         private void getTypeParameters(NodeList<TypeParameter> typeParameters, List<Token> tokens) {
-//            final NodeList<TypeParameter> typeParameters = callableDeclaration.getTypeParameters();
-
             final int size = typeParameters.size();
             if (size == 0) {
                 return;
             }
-            //TODO: fix type parameter display
             tokens.add(new Token(PUNCTUATION, "<"));
             for (int i = 0; i < size; i++) {
                 final TypeParameter typeParameter = typeParameters.get(i);
-
-                getClassType(typeParameter, tokens);
-
-                if (i != 0 && i != size - 1) {
+                getGenericTypeParameter(typeParameter, tokens);
+                if (i != size - 1) {
                     tokens.add(new Token(PUNCTUATION, ","));
                     tokens.add(new Token(WHITESPACE, " "));
                 }
-
-
-                tokens.add(new Token(TYPE_NAME, typeParameter.asString()));
-                System.out.println("index = " + i +
-                        ", Type Parameter = " + typeParameter + ", Name as String = " + typeParameter.getNameAsString() +
-                ", Type Bound = " + typeParameter.getTypeBound() +
-                ", Children Nodes  = " + typeParameter.getChildNodes() +
-                ", Element type = " + typeParameter.getElementType() +
-                ", Name as Expression = " + typeParameter.getNameAsExpression());
             }
-//
-//
             tokens.add(new Token(PUNCTUATION, ">"));
             tokens.add(new Token(WHITESPACE, " "));
+        }
+
+        private void getGenericTypeParameter(TypeParameter typeParameter, List<Token> tokens) {
+            // set navigateToId
+            final String typeName = typeParameter.getNameAsString();
+            final Token token = new Token(TYPE_NAME, typeName);
+            if (knownTypes.containsKey(typeName)) {
+                token.setNavigateToId(knownTypes.get(typeName));
+            }
+            tokens.add(token);
+            // get type bounds
+            final NodeList<ClassOrInterfaceType> typeBounds = typeParameter.getTypeBound();
+            final int size = typeBounds.size();
+            if (size != 0) {
+                tokens.add(new Token(WHITESPACE, " "));
+                tokens.add(new Token(KEYWORD, "extends"));
+                tokens.add(new Token(WHITESPACE, " "));
+                for (int i = 0; i < size; i++) {
+                    ClassOrInterfaceType classType = typeBounds.get(i);
+                    getClassType(classType, tokens);
+                }
+            }
         }
 
         private void getThrowException(CallableDeclaration callableDeclaration, List<Token> tokens) {
@@ -420,7 +423,6 @@ public class ASTAnalyser implements Analyser {
             final int childrenSize = nodes.size();
             if (childrenSize <= 1) {
                 final String typeName = node.toString();
-                System.out.println("getTypeDFS =========== typename = " + typeName);
                 final Token token = new Token(TYPE_NAME, typeName);
                 if (knownTypes.containsKey(typeName)) {
                     token.setNavigateToId(knownTypes.get(typeName));
