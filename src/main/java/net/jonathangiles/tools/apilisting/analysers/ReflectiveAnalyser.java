@@ -16,12 +16,16 @@ import java.lang.reflect.TypeVariable;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static java.lang.reflect.Modifier.classModifiers;
 import static java.lang.reflect.Modifier.isAbstract;
 import static java.lang.reflect.Modifier.isFinal;
 import static java.lang.reflect.Modifier.isProtected;
@@ -45,41 +49,72 @@ public class ReflectiveAnalyser implements Analyser {
         this.knownTypes = new HashMap<>();
     }
 
-    public void analyse(File inputFile, APIListing apiListing) {
-        String inputFileName = inputFile.toString();
-        if (inputFile.isDirectory()) return;
-        if (inputFileName.contains("implementation")) return;
-        if (!inputFileName.endsWith(".class")) return;
+    public void analyse(List<Path> allFiles, File tempDir, APIListing apiListing) {
+        // we build a custom classloader so that we can load classes that were not on the classpath
+        String rootDirectory = tempDir.getPath();
 
-        // Root Navigation
-        ChildItem rootNavForJar = new ChildItem(inputFile.getName());
-        apiListing.addChildItem(rootNavForJar);
-
+        ClassLoader classLoader = null;
         try {
-            String rootDirectory = inputFileName.substring(0, inputFileName.indexOf(".jar/") + 5);
-
             URL url = new File(rootDirectory).toURI().toURL();
             URL[] urls = new URL[] {url};
-            ClassLoader cl = URLClassLoader.newInstance(urls);
+            classLoader = URLClassLoader.newInstance(urls);
+        } catch (MalformedURLException e) {
+            e.printStackTrace();
+            System.exit(-1);
+        }
+        final ClassLoader cl = classLoader;
 
-            // The input file will look like 'temp/azure-core-1.0.0-preview.4.jar/com/azure/core/exception/ServiceResponseException.class',
-            // we want this to be 'com/azure/core/exception/ServiceResponseException.class',
-            // which then can become 'com.azure.core.exception.ServiceResponseException'
-            final String fqcn = inputFileName
-                    .substring(inputFileName.indexOf(".jar/") + 5, inputFileName.length() - 6)
-                    .replaceAll("/", ".");
+        // firstly we filter out the files we don't care about
+        allFiles = allFiles.stream()
+                .filter(path -> {
+                    File inputFile = path.toFile();
+                    String inputFileName = inputFile.toString();
+                    if (inputFile.isDirectory()) return false;
+                    else if (inputFileName.contains("implementation")) return false;
+                    else if (!inputFileName.endsWith(".class")) return false;
+                    else return true;
+                }).collect(Collectors.toList());
 
-            Class cls = cl.loadClass(fqcn);
+        // then we do a pass to build a map of all known types,
+        // followed by a pass to tokenise each file
+        allFiles.stream()
+                .map(path -> scanForTypes(path, apiListing, cl))
+                .collect(Collectors.toList())
+                .stream()
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .forEach(scanClass -> processSingleFile(scanClass, apiListing));
+    }
 
-            // Two phases:
-            //   Phase 1: Build up the map of known types
-            //   Phase 2: Process all types
-            boolean success = scanForTypes(cls);
-            if (!success) return;
-            getClassAPI(cls, apiListing, rootNavForJar);
-        } catch (MalformedURLException | ClassNotFoundException e) {
+    private static class ScanClass {
+        private Class<?> cls;
+        private Path path;
+
+        public ScanClass(Path path, Class<?> cls) {
+            this.cls = cls;
+            this.path = path;
+        }
+    }
+
+    private Optional<ScanClass> scanForTypes(Path path, APIListing apiListing, ClassLoader classLoader) {
+        File inputFile = path.toFile();
+        String inputFileName = inputFile.toString();
+
+        // The input file will look like 'temp/azure-core-1.0.0-preview.4.jar/com/azure/core/exception/ServiceResponseException.class',
+        // we want this to be 'com/azure/core/exception/ServiceResponseException.class',
+        // which then can become 'com.azure.core.exception.ServiceResponseException'
+        final String fqcn = inputFileName
+                .substring(inputFileName.indexOf(".jar/") + 5, inputFileName.length() - 6)
+                .replaceAll("/", ".");
+
+        try {
+            Class cls = classLoader.loadClass(fqcn);
+            return scanForTypes(cls) ? Optional.of(new ScanClass(path, cls)) : Optional.empty();
+        } catch (ClassNotFoundException e) {
             e.printStackTrace();
         }
+
+        return Optional.empty();
     }
 
     private boolean scanForTypes(Class<?> cls) {
@@ -89,9 +124,19 @@ public class ReflectiveAnalyser implements Analyser {
 
         knownTypes.put(cls.getSimpleName(), makeId(cls));
 
-        Stream.of(cls.getDeclaredClasses())
-                .forEach(this::scanForTypes);
+        Stream.of(cls.getDeclaredClasses()).forEach(this::scanForTypes);
         return true;
+    }
+
+    private void processSingleFile(ScanClass scanClass, APIListing apiListing) {
+        File inputFile = scanClass.path.toFile();
+        String inputFileName = inputFile.toString();
+
+        // Root Navigation
+        ChildItem rootNavForJar = new ChildItem(inputFile.getName());
+        apiListing.addChildItem(rootNavForJar);
+
+        getClassAPI(scanClass.cls, apiListing, rootNavForJar);
     }
 
     private boolean getClassAPI(Class<?> cls, APIListing apiListing, ChildItem parent) {
