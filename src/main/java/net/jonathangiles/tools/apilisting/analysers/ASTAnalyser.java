@@ -318,14 +318,14 @@ public class ASTAnalyser implements Analyser {
         }
 
         private void getInnerClass(NodeList<BodyDeclaration<?>> bodyDeclarations, List<Token> tokens) {
-            indent();
-            tokens.add(makeWhitespace());
             for (final BodyDeclaration bodyDeclaration : bodyDeclarations) {
                 if (bodyDeclaration.isEnumDeclaration() || bodyDeclaration.isClassOrInterfaceDeclaration()) {
+                    indent();
+                    tokens.add(makeWhitespace());
                     new ClassOrInterfaceVisitor(parent).visitClassOrInterfaceOrEnumDeclaration(bodyDeclaration.asTypeDeclaration(), tokens);
+                    unindent();
                 }
             }
-            unindent();
         }
 
         private void getModifiers(NodeList<Modifier> modifiers, List<Token> tokens) {
@@ -377,7 +377,6 @@ public class ASTAnalyser implements Analyser {
                 }
             }
             tokens.add(new Token(PUNCTUATION, ">"));
-            tokens.add(new Token(WHITESPACE, " "));
         }
 
         private void getGenericTypeParameter(TypeParameter typeParameter, List<Token> tokens) {
