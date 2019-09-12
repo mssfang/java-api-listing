@@ -43,7 +43,7 @@ public class Test1 {
         return null;
     }
 
-    public List<String> getStringList() throws Exception, RuntimeException {
+    public List<List<String>> getStringList() throws Exception, RuntimeException {
         return null;
     }
 

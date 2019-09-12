@@ -149,7 +149,7 @@ public class Main {
 
         String reviewName = "Storage GA review";
         String outputFile = "target/result.json";
-        String jarFile = "src/main/resources/net/jonathangiles/tools/apilisting/tests/BlobAsyncClient.java";
+        String jarFile = "src/main/resources/net/jonathangiles/tools/apilisting/tests/Test1.java";
 
         Main main = new Main(reviewName, jarFile, outputFile);
     }
