@@ -124,6 +124,7 @@ public class ASTAnalyser implements Analyser {
 
             unindent();
         }
+        
         private void getTypeDeclaration(TypeDeclaration typeDeclaration, List<Token> tokens) {
             // Skip if the class is private or package-private
             if (isPrivateOrPackagePrivate(typeDeclaration.getAccessSpecifier())) {
