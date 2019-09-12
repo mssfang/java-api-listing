@@ -3,7 +3,6 @@ package net.jonathangiles.tools.apilisting;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import net.jonathangiles.tools.apilisting.analysers.ASTAnalyser;
 import net.jonathangiles.tools.apilisting.analysers.Analyser;
-import net.jonathangiles.tools.apilisting.analysers.ASTAnalyser;
 import net.jonathangiles.tools.apilisting.analysers.ReflectiveAnalyser;
 import net.jonathangiles.tools.apilisting.model.APIListing;
 import net.jonathangiles.tools.apilisting.model.Token;
@@ -44,19 +43,6 @@ public class Main {
 //        new Main(reviewName, jarFile, outputFile);
 //    }
 //
-//
-////    public static void main(String[] args) {
-////        // TODO validate input
-////
-////        String reviewName = "Storage GA review";
-//////        String jarFile = "target/classes/net/jonathangiles/tools/apilisting/tests/Test1.class";
-////        String jarFile = "src/main/java/net/jonathangiles/tools/apilisting/tests/Test1.java";
-//////        String jarFile = "src/main/java/net/jonathangiles/tools/apilisting/analysers/Test11.java";
-////
-////        String outputFile = "target/result.json";
-////        Main main = new Main(reviewName, jarFile, outputFile);
-////    }
-//
 //    public Main(String reviewName, String inputFile, String outputFile) {
 //        final File file = new File(inputFile);
 //
@@ -73,9 +59,6 @@ public class Main {
 //        apiListing.setTokens(tokens);
 //
 //        Analyser analyser = new ReflectiveAnalyser();
-//
-////        new ASTAnalyser().analyse(file, apiListing);
-//
 //
 //        final File tempDir = new File("temp/" + file.getName());
 //        try {
@@ -123,8 +106,8 @@ public class Main {
 //        try (ZipFile archive = new ZipFile(archiveFile.toFile())) {
 //            // sort entries by name to always create folders first
 //            List<? extends ZipEntry> entries = archive.stream()
-//                   .sorted(Comparator.comparing(ZipEntry::getName))
-//                   .collect(Collectors.toList());
+//                    .sorted(Comparator.comparing(ZipEntry::getName))
+//                    .collect(Collectors.toList());
 //
 //            // copy each entry in the dest path
 //            for (ZipEntry entry : entries) {
@@ -156,13 +139,17 @@ public class Main {
 //        });
 //    }
 
+
+
+// Used old version of main method to test for single file
+
+
     public static void main(String[] args) {
         // TODO validate input
 
         String reviewName = "Storage GA review";
-//        String jarFile = "target/classes/net/jonathangiles/tools/apilisting/tests/Test1.class";
         String outputFile = "target/result.json";
-        String jarFile = "src/main/java/net/jonathangiles/tools/apilisting/tests/Test1.java";
+        String jarFile = "src/main/resources/net/jonathangiles/tools/apilisting/tests/BlobAsyncClient.java";
 
         Main main = new Main(reviewName, jarFile, outputFile);
     }
@@ -207,6 +194,10 @@ public class Main {
             e.printStackTrace();
         }
     }
+
+
+
+
 
 
 }
