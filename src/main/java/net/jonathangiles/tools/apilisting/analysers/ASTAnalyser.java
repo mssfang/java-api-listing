@@ -17,57 +17,115 @@ import net.jonathangiles.tools.apilisting.model.TypeKind;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static net.jonathangiles.tools.apilisting.model.TokenKind.*;
 
 public class ASTAnalyser implements Analyser {
+    // a map of type name to unique identifier, used for navigation
     private final Map<String, String> knownTypes;
+
+    // a map of package names to a list of types within that package
+    private final Map<String, List<String>> packageNamesToTypesMap;
+
+    private final Map<String, ChildItem> packageNameToNav;
+
     private int indent;
 
     public ASTAnalyser() {
         this.indent = 0;
         this.knownTypes = new HashMap<>();
+        this.packageNamesToTypesMap = new HashMap<>();
+        this.packageNameToNav = new HashMap<>();
     }
 
-    @Override
-    public void analyse(File inputFile, APIListing apiListing) {
-        // Root Navigation
-        ChildItem rootNavForJar = new ChildItem(inputFile.getName());
-        apiListing.addChildItem(rootNavForJar);
+    public void analyse(List<Path> allFiles, File tempDir, APIListing apiListing) {
+        // we build a custom classloader so that we can load classes that were not on the classpath
+        String rootDirectory = tempDir.getPath();
 
-        // TODO get all class files from the jar file and process them individually
-        // Two phases:
-        //   Phase 1: Build up the map of known types
-        //   Phase 2: Process all types
-        getMethod(inputFile, apiListing, rootNavForJar);
-    }
-
-    private void getMethod(File inputFile, APIListing apiListing, ChildItem rootNavForJar) {
-        final List<Token> tokens = apiListing.getTokens();
-        ParseResult<CompilationUnit> compilationUnitParseResult = null;
+        ClassLoader classLoader = null;
         try {
-            compilationUnitParseResult = new JavaParser().parse(inputFile);
+            URL url = new File(rootDirectory).toURI().toURL();
+            URL[] urls = new URL[] {url};
+            classLoader = URLClassLoader.newInstance(urls);
+        } catch (MalformedURLException e) {
+            e.printStackTrace();
+            System.exit(-1);
+        }
+        final ClassLoader cl = classLoader;
+
+        // firstly we filter out the files we don't care about
+        allFiles = allFiles.stream()
+           .filter(path -> {
+               File inputFile = path.toFile();
+               String inputFileName = inputFile.toString();
+               if (inputFile.isDirectory()) return false;
+               else if (inputFileName.contains("implementation")) return false;
+               else if (inputFileName.equals("package-info.java")) return false;
+               else if (!inputFileName.endsWith(".java")) return false;
+               else return true;
+           }).collect(Collectors.toList());
+
+        // then we do a pass to build a map of all known types and package names, and a map of package names to nav items,
+        // followed by a pass to tokenise each file
+        allFiles.stream()
+                .map(path -> scanForTypes(path, cl))
+                .collect(Collectors.toList())
+                .stream()
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .sorted((s1, s2) -> s1.path.compareTo(s2.path))
+                .forEach(scanClass -> processSingleFile(scanClass, apiListing));
+
+        // build the navigation
+        packageNameToNav.values().stream().sorted(Comparator.comparing(ChildItem::getText)).forEach(apiListing::addChildItem);
+    }
+
+    private static class ScanClass {
+        private ParseResult<CompilationUnit> parseResult;
+        private Path path;
+
+        public ScanClass(Path path, ParseResult<CompilationUnit> parseResult) {
+            this.parseResult = parseResult;
+            this.path = path;
+        }
+    }
+
+    private Optional<ScanClass> scanForTypes(Path path, ClassLoader classLoader) {
+        File inputFile = path.toFile();
+
+        try {
+            ParseResult<CompilationUnit> parseResult = new JavaParser().parse(inputFile);
+            new ScanForClassTypeVisitor().visit(parseResult.getResult().get(), knownTypes);
+            return Optional.of(new ScanClass(path, parseResult));
         } catch (FileNotFoundException e) {
             e.printStackTrace();
+            return Optional.empty();
         }
+    }
 
-        if (compilationUnitParseResult == null) {
-            return;
-        }
-        new ScanForClassTypeVisitor().visit(compilationUnitParseResult.getResult().get(), knownTypes);
-        new ClassOrInterfaceVisitor(rootNavForJar).visit(compilationUnitParseResult.getResult().get(), tokens);
+    private void processSingleFile(ScanClass scanClass, APIListing apiListing) {
+        new ClassOrInterfaceVisitor().visit(scanClass.parseResult.getResult().get(), apiListing.getTokens());
     }
 
     private class ClassOrInterfaceVisitor extends VoidVisitorAdapter {
-        private ChildItem parent;
+        private ChildItem parentNav;
 
-        ClassOrInterfaceVisitor(ChildItem root) {
-            parent = root;
+        public ClassOrInterfaceVisitor() {   }
+
+        ClassOrInterfaceVisitor(ChildItem parentNav) {
+            this.parentNav = parentNav;
         }
 
         @Override
@@ -104,7 +162,7 @@ public class ASTAnalyser implements Analyser {
 
             AtomicInteger counter = new AtomicInteger();
 
-            enumConstantDeclarations.stream().forEach(enumConstantDeclaration -> {
+            enumConstantDeclarations.forEach(enumConstantDeclaration -> {
                 tokens.add(makeWhitespace());
                 tokens.add(new Token(MEMBER_NAME, enumConstantDeclaration.getNameAsString()));
 
@@ -125,7 +183,7 @@ public class ASTAnalyser implements Analyser {
             unindent();
         }
         
-        private void getTypeDeclaration(TypeDeclaration typeDeclaration, List<Token> tokens) {
+        private void getTypeDeclaration(TypeDeclaration<?> typeDeclaration, List<Token> tokens) {
             // Skip if the class is private or package-private
             if (isPrivateOrPackagePrivate(typeDeclaration.getAccessSpecifier())) {
                 return;
@@ -144,12 +202,20 @@ public class ASTAnalyser implements Analyser {
                 typeKind = TypeKind.UNKNOWN;
             }
 
+            String fullQualifiedName = typeDeclaration.getFullyQualifiedName().get();
+
             // Create navigation for this class and add it to the parent
             final String className = typeDeclaration.getNameAsString();
-            final String classId = makeId(typeDeclaration.getFullyQualifiedName().get().toString());
+            final String packageName = fullQualifiedName.substring(0, fullQualifiedName.lastIndexOf("."));
+            final String classId = makeId(typeDeclaration.getFullyQualifiedName().get());
             ChildItem classNav = new ChildItem(classId, className, typeKind);
-            parent.addChildItem(classNav);
-            parent = classNav;
+            if (parentNav == null) {
+                packageNameToNav.get(packageName).addChildItem(classNav);
+            } else {
+                parentNav.addChildItem(classNav);
+            }
+//            parent.addChildItem(classNav);
+            parentNav = classNav;
 
             tokens.add(new Token(KEYWORD, typeKind.getName()));
             tokens.add(new Token(WHITESPACE, " "));
@@ -166,6 +232,7 @@ public class ASTAnalyser implements Analyser {
                 // Extends a class
                 final NodeList<ClassOrInterfaceType> extendedTypes = classOrInterfaceDeclaration.getExtendedTypes();
                 if (extendedTypes.size() > 0) {
+                    tokens.add(new Token(WHITESPACE, " "));
                     tokens.add(new Token(KEYWORD, "extends"));
                     tokens.add(new Token(WHITESPACE, " "));
                     // Java only extends one class
@@ -185,6 +252,7 @@ public class ASTAnalyser implements Analyser {
 
             // implements interfaces
             if (implementedTypes != null && implementedTypes.size() > 0) {
+                tokens.add(new Token(WHITESPACE, " "));
                 tokens.add(new Token(KEYWORD, "implements"));
                 tokens.add(new Token(WHITESPACE, " "));
 
@@ -193,7 +261,7 @@ public class ASTAnalyser implements Analyser {
                     tokens.add(new Token(PUNCTUATION, ","));
                     tokens.add(new Token(WHITESPACE, " "));
                 }
-                if (implementedTypes.size() > 0) {
+                if (!implementedTypes.isEmpty()) {
                     tokens.remove(tokens.size() - 1);
                     tokens.remove(tokens.size() - 1);
                 }
@@ -204,7 +272,7 @@ public class ASTAnalyser implements Analyser {
             tokens.add(new Token(NEW_LINE, ""));
         }
 
-        private void getFields(List<FieldDeclaration> fieldDeclarations, List<Token> tokens) {
+        private void getFields(List<? extends FieldDeclaration> fieldDeclarations, List<Token> tokens) {
             indent();
             for ( FieldDeclaration fieldDeclaration : fieldDeclarations) {
                 // Skip if it is private or package-private field
@@ -256,7 +324,7 @@ public class ASTAnalyser implements Analyser {
             unindent();
         }
 
-        private void getConstructor(List<ConstructorDeclaration> constructorDeclarations, List<Token> tokens) {
+        private void getConstructor(List<? extends ConstructorDeclaration> constructorDeclarations, List<Token> tokens) {
             indent();
             for (final ConstructorDeclaration constructorDeclaration : constructorDeclarations) {
                 // Skip if not public
@@ -285,7 +353,7 @@ public class ASTAnalyser implements Analyser {
             unindent();
         }
 
-        private void getMethods(List<MethodDeclaration> methodDeclarations, List<Token> tokens) {
+        private void getMethods(List<? extends MethodDeclaration> methodDeclarations, List<Token> tokens) {
             indent();
             for (final MethodDeclaration methodDeclaration : methodDeclarations) {
                 // Skip if not public API
@@ -323,7 +391,7 @@ public class ASTAnalyser implements Analyser {
                 if (bodyDeclaration.isEnumDeclaration() || bodyDeclaration.isClassOrInterfaceDeclaration()) {
                     indent();
                     tokens.add(makeWhitespace());
-                    new ClassOrInterfaceVisitor(parent).visitClassOrInterfaceOrEnumDeclaration(bodyDeclaration.asTypeDeclaration(), tokens);
+                    new ClassOrInterfaceVisitor(parentNav).visitClassOrInterfaceOrEnumDeclaration(bodyDeclaration.asTypeDeclaration(), tokens);
                     unindent();
                 }
             }
@@ -485,34 +553,35 @@ public class ASTAnalyser implements Analyser {
         }
     }
 
-    private class ScanForClassTypeVisitor extends VoidVisitorAdapter {
+    private class ScanForClassTypeVisitor extends VoidVisitorAdapter<Map<String, String>> {
         @Override
-        public void visit(CompilationUnit compilationUnit, Object arg) {
+        public void visit(CompilationUnit compilationUnit, Map<String, String> arg) {
             for (final TypeDeclaration<?> typeDeclaration : compilationUnit.getTypes()) {
-                getTypeDeclaration(typeDeclaration, (Map<String, String>)arg);
+                getTypeDeclaration(typeDeclaration, arg);
             }
         }
-        private void getTypeDeclaration(TypeDeclaration typeDeclaration, Map<String, String> knownTypes) {
+
+        private void getTypeDeclaration(TypeDeclaration<?> typeDeclaration, Map<String, String> knownTypes) {
             // Skip if the class is private or package-private
             if (isPrivateOrPackagePrivate(typeDeclaration.getAccessSpecifier())) {
                 return;
             }
 
-            final String fullQualifiedName;
-
-            if (typeDeclaration.isClassOrInterfaceDeclaration()) {
-                fullQualifiedName = ((ClassOrInterfaceDeclaration)typeDeclaration).getFullyQualifiedName().get();
-            } else if (typeDeclaration.isEnumDeclaration()) {
-                fullQualifiedName = ((EnumDeclaration)typeDeclaration).getFullyQualifiedName().get();
-            } else {
-                fullQualifiedName = null;
-            }
-
-            if (fullQualifiedName == null) {
+            if (! (typeDeclaration.isClassOrInterfaceDeclaration() || typeDeclaration.isEnumDeclaration())) {
                 return;
             }
 
-            knownTypes.put(typeDeclaration.getNameAsString(), makeId(fullQualifiedName));
+            final String fullQualifiedName = typeDeclaration.getFullyQualifiedName().get();
+
+            // determine the package name for this class
+            String typeName = typeDeclaration.getNameAsString();
+            String packageName = fullQualifiedName.substring(0, fullQualifiedName.lastIndexOf("."));
+            packageNamesToTypesMap.computeIfAbsent(packageName, name -> new ArrayList<>()).add(typeName);
+
+            // generate a navigation item for each new package, but we don't add them to the parent yet
+            packageNameToNav.computeIfAbsent(packageName, name -> new ChildItem(packageName));
+
+            knownTypes.put(typeName, makeId(fullQualifiedName));
 
             for (final Object bodyDeclaration : typeDeclaration.getMembers()) {
                 BodyDeclaration bodyDeclarationMember = (BodyDeclaration)bodyDeclaration;

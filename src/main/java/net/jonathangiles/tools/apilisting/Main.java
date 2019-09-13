@@ -1,6 +1,7 @@
 package net.jonathangiles.tools.apilisting;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.jonathangiles.tools.apilisting.analysers.ASTAnalyser;
 import net.jonathangiles.tools.apilisting.analysers.Analyser;
 import net.jonathangiles.tools.apilisting.analysers.ReflectiveAnalyser;
 import net.jonathangiles.tools.apilisting.model.APIListing;
@@ -62,7 +63,8 @@ public class Main {
         List<Token> tokens = new ArrayList<>();
         apiListing.setTokens(tokens);
 
-        Analyser analyser = new ReflectiveAnalyser();
+//        Analyser analyser = new ReflectiveAnalyser();
+        Analyser analyser = new ASTAnalyser();
 
         final File tempDir = new File("temp/" + inputFile.getName());
         try {
@@ -95,13 +97,13 @@ public class Main {
 
 
         // print to console
-        tokens.stream().forEach(token -> {
-            if (token.getKind() == NEW_LINE) {
-                System.out.println("");
-            } else {
-                System.out.print(token.getValue());
-            }
-        });
+//        tokens.stream().forEach(token -> {
+//            if (token.getKind() == NEW_LINE) {
+//                System.out.println("");
+//            } else {
+//                System.out.print(token.getValue());
+//            }
+//        });
 
         try {
             ObjectMapper objectMapper = new ObjectMapper();

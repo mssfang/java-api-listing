@@ -78,7 +78,7 @@ public class ReflectiveAnalyser implements Analyser {
         // then we do a pass to build a map of all known types,
         // followed by a pass to tokenise each file
         allFiles.stream()
-                .map(path -> scanForTypes(path, apiListing, cl))
+                .map(path -> scanForTypes(path, cl))
                 .collect(Collectors.toList())
                 .stream()
                 .filter(Optional::isPresent)
@@ -96,7 +96,7 @@ public class ReflectiveAnalyser implements Analyser {
         }
     }
 
-    private Optional<ScanClass> scanForTypes(Path path, APIListing apiListing, ClassLoader classLoader) {
+    private Optional<ScanClass> scanForTypes(Path path, ClassLoader classLoader) {
         File inputFile = path.toFile();
         String inputFileName = inputFile.toString();
 
